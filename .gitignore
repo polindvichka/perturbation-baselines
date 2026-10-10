@@ -2,3 +2,6 @@
 data/
 .ipynb_checkpoints/
 notes/
+__pycache__/
+*.pyc
+.DS_Store
