@@ -81,3 +81,51 @@ def load_control_context(name, root="/root/vcc/controls", genes=None):
     X = log_cp10k(harmonise_genes(a, genes))
     basal = np.asarray(X.mean(0)).ravel()
     return Context(name, genes, basal, pd.DataFrame(columns=genes), pd.Series(dtype=int))
+
+
+@dataclass
+class DeltaTable:
+    """Perturbation x gene mean-change table in a dataset's own gene space."""
+    name: str
+    genes: np.ndarray    # (G,) measured genes in this dataset
+    perts: np.ndarray    # (P,) perturbed gene symbols
+    delta: np.ndarray    # (P, G) float32; own-gene entry set to NaN
+    basal: np.ndarray    # (G,) control-cell mean log1p(CP10K)
+    n_cells: np.ndarray  # (P,)
+
+    def save(self, path):
+        np.savez_compressed(path, name=np.array(self.name), genes=self.genes.astype(str),
+                            perts=self.perts.astype(str), delta=self.delta,
+                            basal=self.basal, n_cells=self.n_cells)
+
+    @classmethod
+    def load(cls, path):
+        z = np.load(path)
+        return cls(str(z["name"]), z["genes"], z["perts"], z["delta"], z["basal"], z["n_cells"])
+
+
+def build_delta_table(path, name, pert_col="gene", control=CONTROL_LABEL, chunk=50_000, min_cells=20):
+    """Stream a large backed h5ad and compute per-perturbation mean log1p(CP10K) minus control mean."""
+    a = ad.read_h5ad(path, backed="r")
+    labels = a.obs[pert_col].astype(str).to_numpy()
+    cats, inv = np.unique(labels, return_inverse=True)
+    counts = np.bincount(inv, minlength=len(cats))
+    sums = np.zeros((len(cats), a.n_vars), dtype=np.float64)
+    for s in range(0, a.n_obs, chunk):
+        e = min(s + chunk, a.n_obs)
+        X = log_cp10k(a.X[s:e])
+        Gc = sp.csr_matrix((np.ones(e - s), (inv[s:e], np.arange(e - s))), shape=(len(cats), e - s))
+        sums += np.asarray((Gc @ X).todense())
+        print(f"  {name}: {e}/{a.n_obs} cells", flush=True)
+    means = sums / counts[:, None]
+    ci = int(np.where(cats == control)[0][0])
+    basal = means[ci]
+    keep = (counts >= min_cells) & (np.arange(len(cats)) != ci)
+    delta = (means[keep] - basal).astype(np.float32)
+    perts = cats[keep]
+    own = pd.Index(a.var_names).get_indexer(perts)      # mask each knockdown's own gene
+    for r, g in enumerate(own):
+        if g >= 0:
+            delta[r, g] = np.nan
+    return DeltaTable(name, np.asarray(a.var_names, dtype=str), perts, delta,
+                      basal.astype(np.float32), counts[keep])
