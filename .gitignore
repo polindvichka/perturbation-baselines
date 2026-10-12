@@ -4,4 +4,11 @@ data/
 notes/
 __pycache__/
 *.pyc
+.DS_Store__pycache__/
 .DS_Store
+.venv/
+*.h5ad
+*.vcc
+*.npz
+.ipynb_checkpoints/
+processed/
