@@ -41,14 +41,19 @@ def harmonise_genes(adata, genes):
     return (X.tocsc()[:, keep] @ S).tocsr()
 
 
-def log_cp10k(X):
-    """Library-size normalise to 10k counts per cell, then log1p. Keeps sparsity."""
+def cp10k(X):
+    """Library-size normalise to 10k counts per cell. Keeps sparsity."""
     X = sp.csr_matrix(X, dtype=np.float32)
     lib = np.asarray(X.sum(1)).ravel()
     lib[lib == 0] = 1.0
-    X = sp.diags(1e4 / lib) @ X
+    return (sp.diags(1e4 / lib) @ X).tocsr()
+
+
+def log_cp10k(X):
+    """Library-size normalise to 10k counts per cell, then log1p. Keeps sparsity."""
+    X = cp10k(X)
     X.data = np.log1p(X.data)
-    return X.tocsr()
+    return X
 
 
 def group_means(X, labels):
@@ -94,16 +99,22 @@ class DeltaTable:
     delta: np.ndarray    # (P, G) float32; own-gene entry set to NaN
     basal: np.ndarray    # (G,) control-cell mean log1p(CP10K)
     n_cells: np.ndarray  # (P,)
+    # mean CP10K without the log (log of these = pseudobulk log fold change); None in older tables
+    mean_cp10k: np.ndarray = None    # (P, G) float32
+    basal_cp10k: np.ndarray = None   # (G,)
 
     def save(self, path):
+        extra = {} if self.mean_cp10k is None else dict(mean_cp10k=self.mean_cp10k, basal_cp10k=self.basal_cp10k)
         np.savez_compressed(path, name=np.array(self.name), genes=self.genes.astype(str),
                             perts=self.perts.astype(str), delta=self.delta,
-                            basal=self.basal, n_cells=self.n_cells)
+                            basal=self.basal, n_cells=self.n_cells, **extra)
 
     @classmethod
     def load(cls, path):
         z = np.load(path)
-        return cls(str(z["name"]), z["genes"], z["perts"], z["delta"], z["basal"], z["n_cells"])
+        get = lambda k: z[k] if k in z.files else None
+        return cls(str(z["name"]), z["genes"], z["perts"], z["delta"], z["basal"], z["n_cells"],
+                   get("mean_cp10k"), get("basal_cp10k"))
 
 
 def build_delta_table(path, name, pert_col="gene", control=CONTROL_LABEL, chunk=50_000, min_cells=20):
@@ -112,14 +123,18 @@ def build_delta_table(path, name, pert_col="gene", control=CONTROL_LABEL, chunk=
     labels = a.obs[pert_col].astype(str).to_numpy()
     cats, inv = np.unique(labels, return_inverse=True)
     counts = np.bincount(inv, minlength=len(cats))
-    sums = np.zeros((len(cats), a.n_vars), dtype=np.float64)
+    sums = np.zeros((len(cats), a.n_vars), dtype=np.float64)       # of log1p(CP10K)
+    lin_sums = np.zeros((len(cats), a.n_vars), dtype=np.float64)   # of CP10K
     for s in range(0, a.n_obs, chunk):
         e = min(s + chunk, a.n_obs)
-        X = log_cp10k(a.X[s:e])
+        X = cp10k(a.X[s:e])
         Gc = sp.csr_matrix((np.ones(e - s), (inv[s:e], np.arange(e - s))), shape=(len(cats), e - s))
+        lin_sums += np.asarray((Gc @ X).todense())
+        X.data = np.log1p(X.data)
         sums += np.asarray((Gc @ X).todense())
         print(f"  {name}: {e}/{a.n_obs} cells", flush=True)
     means = sums / counts[:, None]
+    lin_means = lin_sums / counts[:, None]
     ci = int(np.where(cats == control)[0][0])
     basal = means[ci]
     keep = (counts >= min_cells) & (np.arange(len(cats)) != ci)
@@ -130,4 +145,5 @@ def build_delta_table(path, name, pert_col="gene", control=CONTROL_LABEL, chunk=
         if g >= 0:
             delta[r, g] = np.nan
     return DeltaTable(name, np.asarray(a.var_names, dtype=str), perts, delta,
-                      basal.astype(np.float32), counts[keep])
+                      basal.astype(np.float32), counts[keep],
+                      lin_means[keep].astype(np.float32), lin_means[ci].astype(np.float32))

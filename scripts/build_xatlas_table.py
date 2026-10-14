@@ -27,6 +27,7 @@ MAX_BATCHES = int(sys.argv[2]) if len(sys.argv) > 2 else None
 REPO = "Xaira-Therapeutics/X-Atlas-Orion"
 BATCH = 20_000
 CONTROL_LABEL = "Non-Targeting"
+PROCESSED.mkdir(parents=True, exist_ok=True)
 OUT = PROCESSED / (f"xatlas_{SPLIT}_delta.npz" if MAX_BATCHES is None else f"xatlas_{SPLIT}_trial.npz")
 
 genes = pd.read_csv(CONTROLS / "gene_names.csv")["gene_name"].tolist()
@@ -45,7 +46,8 @@ print(f"gene ids that map to a challenge gene: {(token_to_col >= 0).sum()} of {l
 wanted = targets + [CONTROL_LABEL]
 group_of = {label: k for k, label in enumerate(wanted)}
 wanted_array = pa.array(wanted, pa.string())
-sums = np.zeros((len(wanted), len(genes)))
+sums = np.zeros((len(wanted), len(genes)))        # of log1p(CP10K)
+lin_sums = np.zeros((len(wanted), len(genes)))    # of CP10K
 n_cells = np.zeros(len(wanted))
 
 
@@ -65,11 +67,13 @@ def process(table):
     n = len(group)
     row_of_value = np.repeat(np.arange(n), lengths)
     totals = np.bincount(row_of_value, weights=flat_expr, minlength=n)       # counts per cell
-    value = np.log1p(1e4 * flat_expr / np.maximum(totals[row_of_value], 1))   # log1p(CP10K)
+    value = 1e4 * flat_expr / np.maximum(totals[row_of_value], 1)             # CP10K
     col = token_to_col[flat_tokens]
     keep = col >= 0
     X = sparse.csr_matrix((value[keep], (row_of_value[keep], col[keep])), shape=(n, len(genes)))
     G = sparse.csr_matrix((np.ones(n), (group, np.arange(n))), shape=(len(wanted), n))
+    lin_sums[:] += (G @ X).toarray()
+    X.data = np.log1p(X.data)                                                  # log1p(CP10K)
     sums[:] += (G @ X).toarray()
     n_cells[:] += np.bincount(group, minlength=len(wanted))
     return n
@@ -95,6 +99,7 @@ print(f"finished: {seen} cells read, {kept} kept, {time.time() - start:.0f} s")
 
 # ---- turn sums into effects --------------------------------------------------------
 means = sums / np.maximum(n_cells, 1)[:, None]
+lin_means = (lin_sums / np.maximum(n_cells, 1)[:, None]).astype(np.float32)
 control = means[-1]
 delta = means[:-1] - control
 for i, target in enumerate(targets):
@@ -103,7 +108,8 @@ for i, target in enumerate(targets):
 delta[:, control == 0] = np.nan                                # gene not measured in this dataset
 np.savez_compressed(OUT, perts=np.array(targets), genes=np.array(genes), delta=delta.astype(np.float32),
                     n_cells=n_cells[:-1].astype(int), control_cells=int(n_cells[-1]),
-                    control_profile=control.astype(np.float32))
+                    control_profile=control.astype(np.float32),
+                    mean_cp10k=lin_means[:-1], control_cp10k=lin_means[-1])
 cells = n_cells[:-1]
 print(f"control cells: {int(n_cells[-1])}")
 print(f"targets with at least 20 cells: {(cells >= 20).sum()} of {len(targets)}; cells per target min/median/max: "
