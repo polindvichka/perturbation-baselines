@@ -6,15 +6,16 @@ string  which genes it interacts with in STRING (combined score >= 700), reduced
 Genes that are knocked down in the same pathway or complex tend to change the same genes, so these are the
 features most likely to say something about WHICH gene was perturbed.
 
-Downloads (once) to /workspace/data/pathway/: goa_human.gaf.gz, 9606.protein.info.v12.0.txt.gz,
-9606.protein.links.v12.0.txt.gz.  Writes /workspace/processed/pathway_features.npz with
+Downloads (once) to DATA/pathway/: goa_human.gaf.gz, 9606.protein.info.v12.0.txt.gz,
+9606.protein.links.v12.0.txt.gz.  Writes PROCESSED/pathway_features.npz with
     genes (n,)   gene symbols
     go (n, N_DIM), string (n, N_DIM)   float32; all zeros for a gene that has no annotation / no interaction
     has_go (n,), has_string (n,)       bool
 
-Usage: python scripts/build_pathway_features.py
+Usage: python archive/build_pathway_features.py
 """
 import gzip
+import sys
 import urllib.request
 from pathlib import Path
 
@@ -23,8 +24,11 @@ import pandas as pd
 from scipy import sparse
 from sklearn.decomposition import TruncatedSVD
 
-DATA = Path("/workspace/data/pathway")
-OUT = Path("/workspace/processed/pathway_features.npz")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.paths import DATA, PROCESSED
+
+PATHWAY_DIR = DATA / "pathway"
+OUT = PROCESSED / "pathway_features.npz"
 URLS = {
     "goa_human.gaf.gz": "https://current.geneontology.org/annotations/goa_human.gaf.gz",
     "9606.protein.info.v12.0.txt.gz": "https://stringdb-downloads.org/download/protein.info.v12.0/9606.protein.info.v12.0.txt.gz",
@@ -36,9 +40,9 @@ STRING_MIN_SCORE = 700
 
 
 def fetch():
-    DATA.mkdir(parents=True, exist_ok=True)
+    PATHWAY_DIR.mkdir(parents=True, exist_ok=True)
     for name, url in URLS.items():
-        path = DATA / name
+        path = PATHWAY_DIR / name
         if not path.exists():
             print("downloading", name, flush=True)
             urllib.request.urlretrieve(url, path)
@@ -48,7 +52,7 @@ def fetch():
 def read_go():
     """gene symbol -> set of GO ids (GAF 2.x: column 2 = symbol, 3 = qualifier, 4 = GO id)."""
     pairs = set()
-    with gzip.open(DATA / "goa_human.gaf.gz", "rt") as fh:
+    with gzip.open(PATHWAY_DIR / "goa_human.gaf.gz", "rt") as fh:
         for line in fh:
             if line.startswith("!"):
                 continue
@@ -62,11 +66,11 @@ def read_go():
 
 
 def read_string():
-    info = pd.read_csv(DATA / "9606.protein.info.v12.0.txt.gz", sep="\t", usecols=[0, 1])
+    info = pd.read_csv(PATHWAY_DIR / "9606.protein.info.v12.0.txt.gz", sep="\t", usecols=[0, 1])
     info.columns = ["id", "name"]
     name_of = dict(zip(info.id, info.name))
     parts = []
-    for chunk in pd.read_csv(DATA / "9606.protein.links.v12.0.txt.gz", sep=" ", chunksize=2_000_000):
+    for chunk in pd.read_csv(PATHWAY_DIR / "9606.protein.links.v12.0.txt.gz", sep=" ", chunksize=2_000_000):
         chunk = chunk[chunk["combined_score"] >= STRING_MIN_SCORE]
         parts.append(pd.DataFrame({"a": chunk["protein1"].map(name_of), "b": chunk["protein2"].map(name_of),
                                    "w": chunk["combined_score"] / 1000.0}))

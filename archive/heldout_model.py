@@ -16,9 +16,9 @@ profiles does the prediction match worse than it matches the right one? 1.0 = al
 right one, 0.5 = chance. The average effect over all test genes is removed first, so the
 score only measures what is specific to each gene.
 
-Needs coexpr_K562.npz (scripts/build_coexpr_features.py) and pathway_features.npz (scripts/build_pathway_features.py).
+Needs coexpr_K562.npz (archive/build_coexpr_features.py) and pathway_features.npz (archive/build_pathway_features.py).
 
-Usage: python scripts/heldout_model.py
+Usage: python archive/heldout_model.py
 """
 import sys
 from pathlib import Path
@@ -28,28 +28,21 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.data import DeltaTable
+from src.paths import CONTROLS, PROCESSED
 
-CONTROL_DIR = Path("/root/vcc/controls")
-PROCESSED = Path("/workspace/processed")
 MIN_CELLS = 20
 RIDGE_ALPHAS = [0.1, 1, 10, 100, 1000, 10000]
 KNN_KS = [5, 20, 50, 200]
 FEATURE_SETS = ["esm", "coexpr", "go", "string", "pathway", "all"]
 
-genes = pd.read_csv(CONTROL_DIR / "gene_names.csv")["gene_name"].tolist()
+genes = pd.read_csv(CONTROLS / "gene_names.csv")["gene_name"].tolist()
 gene_pos = {g: i for i, g in enumerate(genes)}
-targets = pd.read_csv(CONTROL_DIR / "pert_counts.csv")["target_gene"].tolist()
+targets = pd.read_csv(CONTROLS / "pert_counts.csv")["target_gene"].tolist()
 target_set = set(targets)
 
 # ---- K562 table (training data) ---------------------------------------------------
 table = DeltaTable.load(str(PROCESSED / "k562_delta.npz"))
-rows = None
-for name in ("perturbations", "perts", "perturbation", "rows", "index", "labels", "names"):
-    if hasattr(table, name):
-        rows = list(getattr(table, name))
-        break
-if rows is None:
-    raise SystemExit(f"Cannot find the row names. Fields on DeltaTable: {list(vars(table))}")
+rows = list(table.perts)
 k_genes = list(table.genes)
 k_col = {g: i for i, g in enumerate(k_genes)}                       # gene -> K562 column
 k_to_challenge = pd.Index(genes).get_indexer(k_genes)               # K562 column -> challenge column
@@ -65,7 +58,7 @@ c = np.load(PROCESSED / "coexpr_K562.npz", allow_pickle=True)
 co_of = {g: i for i, g in enumerate(list(c["genes"]))}
 coexpr = c["feat"].astype(np.float32)
 
-p = np.load(PROCESSED / "pathway_features.npz", allow_pickle=True)   # from scripts/build_pathway_features.py
+p = np.load(PROCESSED / "pathway_features.npz", allow_pickle=True)   # from archive/build_pathway_features.py
 pw_of = {g: i for i, g in enumerate(list(p["genes"]))}
 go_feat, string_feat = p["go"].astype(np.float32), p["string"].astype(np.float32)
 zero_row = np.zeros(go_feat.shape[1], dtype=np.float32)               # genes with no annotation get zeros

@@ -5,6 +5,7 @@ which gives one number per gene. Then we correlate those profiles.
 
 Usage: python scripts/context_fingerprint.py
 """
+import sys
 from pathlib import Path
 
 import anndata as ad
@@ -13,12 +14,13 @@ import pandas as pd
 from scipy import sparse
 from scipy.stats import spearmanr
 
-CONTROL_DIR = Path("/root/vcc/controls")
-DATA = Path("/workspace/data")
-OUT_CSV = "/workspace/processed/control_profiles.csv"
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.paths import CONTROLS, DATA, PROCESSED
+
+OUT_CSV = PROCESSED / "control_profiles.csv"
 CHUNK = 50_000
 
-challenge_genes = pd.read_csv(CONTROL_DIR / "gene_names.csv")["gene_name"].tolist()
+challenge_genes = pd.read_csv(CONTROLS / "gene_names.csv")["gene_name"].tolist()
 challenge_set = set(challenge_genes)
 
 # (name, file, obs column with the perturbation label, label of the control cells)
@@ -75,7 +77,7 @@ def control_profile(name, path, column, control):
 
 def context_profile(label):
     print(f"context {label}: reading controls", flush=True)
-    adata = ad.read_h5ad(CONTROL_DIR / f"context_{label}.h5ad")
+    adata = ad.read_h5ad(CONTROLS / f"context_{label}.h5ad")
     s, n = log_cp10k_sum(adata.X)
     return pd.Series(s / n, index=adata.var_names.astype(str)).groupby(level=0).mean()
 

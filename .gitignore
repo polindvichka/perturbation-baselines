@@ -1,14 +1,15 @@
 .venv/
-data/
-.ipynb_checkpoints/
-notes/
 __pycache__/
 *.pyc
-.DS_Store__pycache__/
 .DS_Store
-.venv/
+.ipynb_checkpoints/
+
+# data and outputs (live under $VCC_DATA, see src/paths.py)
+controls/
+data/
+processed/
 *.h5ad
 *.vcc
 *.npz
-.ipynb_checkpoints/
-processed/
+
+notes/

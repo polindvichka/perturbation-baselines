@@ -1,15 +1,17 @@
 import sys
-sys.path.insert(0, "src")
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np
 import pandas as pd
-from data import DeltaTable
+from src.data import DeltaTable
+from src.paths import CONTROLS, PROCESSED
 
 # 1. Load the K562 table and the gene cards
-table = DeltaTable.load("/workspace/processed/k562_delta.npz")
+table = DeltaTable.load(PROCESSED / "k562_delta.npz")
 delta = table.delta
 n_rows, n_genes = delta.shape
-z = np.load("/workspace/processed/esm2_35m.npz", allow_pickle=True)
+z = np.load(PROCESSED / "esm2_35m.npz", allow_pickle=True)
 card_of = {g: i for i, g in enumerate(z["genes"])}
 cards = z["emb"]
 
@@ -26,7 +28,7 @@ norms[norms == 0] = 1
 unit = features / norms
 
 # 2. The same hidden groups as before
-challenge = pd.read_csv("/root/vcc/controls/pert_counts.csv")["target_gene"].to_numpy()
+challenge = pd.read_csv(CONTROLS / "pert_counts.csv")["target_gene"].to_numpy()
 challenge_rows = np.where(np.isin(table.perts, challenge))[0]
 rng = np.random.default_rng(0)
 groups = np.array_split(rng.permutation(challenge_rows), 5)

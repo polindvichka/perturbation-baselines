@@ -1,19 +1,21 @@
 import sys
-sys.path.insert(0, "src")
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np
 import pandas as pd
-from data import DeltaTable
+from src.data import DeltaTable
+from src.paths import CONTROLS, PROCESSED
 
 # ---------- 1. Load the K562 table ----------
 # One row per knocked-down gene, one column per measured gene.
 # A cell holds "how much did this gene's expression change?"
-table = DeltaTable.load("/workspace/processed/k562_delta.npz")
+table = DeltaTable.load(PROCESSED / "k562_delta.npz")
 delta = table.delta
 n_perts, n_genes = delta.shape
 
 # ---------- 2. Find the rows that are challenge genes ----------
-challenge_genes = pd.read_csv("/root/vcc/controls/pert_counts.csv")["target_gene"].to_numpy()
+challenge_genes = pd.read_csv(CONTROLS / "pert_counts.csv")["target_gene"].to_numpy()
 is_challenge = np.isin(table.perts, challenge_genes)
 challenge_rows = np.where(is_challenge)[0]          # about 269 rows
 print("challenge genes found in K562:", len(challenge_rows))

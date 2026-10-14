@@ -1,19 +1,21 @@
 import sys
-sys.path.insert(0, "src")
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np
 import pandas as pd
 import anndata as ad
-from data import DeltaTable, log_cp10k
+from src.data import DeltaTable, log_cp10k
+from src.paths import CONTROLS, DATA, PROCESSED
 
 # 1. Which K562 rows are challenge genes, and how many cells did each have?
-table = DeltaTable.load("/workspace/processed/k562_delta.npz")
-challenge = pd.read_csv("/root/vcc/controls/pert_counts.csv")["target_gene"].to_numpy()
+table = DeltaTable.load(PROCESSED / "k562_delta.npz")
+challenge = pd.read_csv(CONTROLS / "pert_counts.csv")["target_gene"].to_numpy()
 rows = np.where(np.isin(table.perts, challenge))[0]
 cell_counts = table.n_cells[rows]
 
 # 2. Load all the non-targeting (control) cells from K562
-a = ad.read_h5ad("/workspace/data/replogle_2022_k562_gwps.h5ad", backed="r")
+a = ad.read_h5ad(DATA / "replogle_2022_k562_gwps.h5ad", backed="r")
 is_control = (a.obs["gene"].astype(str).to_numpy() == "non-targeting")
 controls = a[np.where(is_control)[0]].to_memory()
 X = log_cp10k(controls.X)

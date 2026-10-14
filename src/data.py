@@ -6,6 +6,8 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 
+from src.paths import CONTROLS
+
 CONTROL_LABEL = "non-targeting"
 
 
@@ -74,7 +76,7 @@ def pseudobulk_delta(adata, genes, pert_col="target_gene", control=CONTROL_LABEL
     return basal, delta, counts[ok]
 
 
-def load_control_context(name, root="/root/vcc/controls", genes=None):
+def load_control_context(name, root=CONTROLS, genes=None):
     """Challenge context: controls only, so the delta table is empty."""
     genes = load_genes(f"{root}/gene_names.csv") if genes is None else genes
     a = ad.read_h5ad(f"{root}/context_{name}.h5ad")

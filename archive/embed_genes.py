@@ -3,6 +3,10 @@ import numpy as np
 import pandas as pd
 import torch
 from transformers import AutoTokenizer, AutoModel
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.paths import PROCESSED
 
 MODEL = "facebook/esm2_t12_35M_UR50D"
 MAX_RESIDUES = 1022          # ESM-2 can read at most 1022 amino acids
@@ -11,7 +15,7 @@ BATCH = 32
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print("device:", device, flush=True)
 
-table = pd.read_csv("/workspace/processed/gene_sequences.csv")
+table = pd.read_csv(PROCESSED / "gene_sequences.csv")
 table["sequence"] = table["sequence"].str.slice(0, MAX_RESIDUES)    # cut very long proteins
 table = table.sort_values("length").reset_index(drop=True)          # similar lengths batch together
 
@@ -40,5 +44,5 @@ with torch.no_grad():
 
 emb = np.concatenate(vectors).astype(np.float32)
 genes = table["gene"].astype(str).to_numpy()
-np.savez_compressed("/workspace/processed/esm2_35m.npz", genes=genes, emb=emb)
+np.savez_compressed(PROCESSED / "esm2_35m.npz", genes=genes, emb=emb)
 print("saved:", emb.shape, "| mean", float(emb.mean()), "| std", float(emb.std()))

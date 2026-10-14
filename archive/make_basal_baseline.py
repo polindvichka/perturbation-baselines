@@ -4,9 +4,12 @@ import numpy as np
 import pandas as pd
 import scipy.sparse as sp
 import anndata as ad
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.paths import CONTROLS, PROCESSED
 
-CONTROLS = "/root/vcc/controls"
-OUT = "/workspace/processed/basal_baseline.h5ad"
+OUT = PROCESSED / "basal_baseline.h5ad"
 
 genes = pd.read_csv(f"{CONTROLS}/gene_names.csv")["gene_name"].astype(str).to_numpy()
 perts = pd.read_csv(f"{CONTROLS}/pert_counts.csv")["target_gene"].astype(str).to_numpy()

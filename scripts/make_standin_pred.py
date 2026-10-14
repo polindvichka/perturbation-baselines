@@ -13,14 +13,14 @@ Usage:
                        removed and the donor average effect is used in its place. Use this to judge the model
                        fairly, because the plain 'model' effect carries K562's own average response (it was
                        trained on K562 rows), which a new cell context would not have.
-                model  effect predicted by scripts/heldout_model.py (trained without any challenge gene's own row);
+                model  effect predicted by archive/heldout_model.py (trained without any challenge gene's own row);
                        genes it has no prediction for get the average effect. Optional 5th argument: which
                        saved model to use (default: the one that scored best on held-back TRAINING genes)
                 avg    the same average effect for every perturbation (mean over HCT116 and HEK293T)
                 look   each perturbation's own row from HCT116 and HEK293T (mean of the two), average if absent
         SCALE   multiplies the effect before it is applied (effect is a log-expression change)
         TOPK    if > 0, keep only the TOPK genes with the largest |effect| for each perturbation
-Writes /workspace/processed/standin/pred_{CELLS}_{EFFECT}_x{SCALE}_k{TOPK}.h5ad
+Writes PROCESSED/standin/pred_{CELLS}_{EFFECT}_x{SCALE}_k{TOPK}.h5ad
 """
 import sys
 from pathlib import Path
@@ -29,8 +29,9 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 from scipy import sparse
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.paths import PROCESSED
 
-PROCESSED = Path("/workspace/processed")
 STANDIN = PROCESSED / "standin"
 MIN_CELLS = 20
 N_CELLS = 400

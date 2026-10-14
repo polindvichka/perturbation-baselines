@@ -5,7 +5,7 @@ Why: when a gene is knocked down, the genes that change are mostly the ones that
 fall together with it. Control cells (non-targeting guide) show that pattern without any knockdown.
 
 For each source of control cells (K562, context A, B, C) this writes
-/workspace/processed/coexpr_{NAME}.npz with
+PROCESSED/coexpr_{NAME}.npz with
     genes   gene symbols measured in that source
     anchors the anchor gene symbols (the SAME list for every source)
     feat    (len(genes) x len(anchors)) Pearson correlation of log1p(CP10K) across control cells;
@@ -14,8 +14,9 @@ For each source of control cells (K562, context A, B, C) this writes
 Anchors = the 2000 most variable genes that are expressed in all four sources, so a feature column
 means the same thing in every source.
 
-Usage: python scripts/build_coexpr_features.py
+Usage: python archive/build_coexpr_features.py
 """
+import sys
 from pathlib import Path
 
 import anndata as ad
@@ -23,9 +24,10 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
-CONTROL_DIR = Path("/root/vcc/controls")
-DATA = Path("/workspace/data")
-OUT = Path("/workspace/processed")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.paths import CONTROLS, DATA, PROCESSED
+
+OUT = PROCESSED
 CHUNK = 50_000
 N_ANCHORS = 2000
 MIN_MEAN = 0.1          # anchor genes must have mean log1p(CP10K) above this in every source
@@ -67,7 +69,7 @@ def load_controls(label, challenge_set):
         X = sparse.vstack(parts).tocsr()
     else:
         print(f"context {label}: reading controls", flush=True)
-        adata = ad.read_h5ad(CONTROL_DIR / f"context_{label}.h5ad")
+        adata = ad.read_h5ad(CONTROLS / f"context_{label}.h5ad")
         X = log_cp10k(adata.X)
     names = gene_names(adata, challenge_set)
     first = ~pd.Series(names).duplicated().to_numpy()
@@ -78,7 +80,7 @@ def load_controls(label, challenge_set):
 
 
 def main():
-    challenge_set = set(pd.read_csv(CONTROL_DIR / "gene_names.csv")["gene_name"])
+    challenge_set = set(pd.read_csv(CONTROLS / "gene_names.csv")["gene_name"])
     sources = {}
     for label in ("K562", "A", "B", "C"):
         sources[label] = load_controls(label, challenge_set)

@@ -3,10 +3,10 @@
 One-off setup (about 10-30 minutes; builds the generic-response baseline and replicate anchors):
     python scripts/local_score.py prepare
 Then, for each prediction h5ad (perturbed cells only; obs['target_gene']; same genes as real.h5ad):
-    python scripts/local_score.py score /workspace/processed/standin/pred_xxx.h5ad
+    python scripts/local_score.py score $VCC_DATA/processed/standin/pred_xxx.h5ad
 
 Prints the six metrics on the competition scale (0 = generic-response baseline, 1 = real replicate)
-and their plain mean. Each run is appended to /workspace/processed/standin/scores.csv.
+and their plain mean. Each run is appended to PROCESSED/standin/scores.csv.
 
 Notes: DE runs on the CPU engine (pdex), the official leaderboard may use a GPU engine, so use these numbers
 for comparing methods with each other, not as a prediction of the leaderboard value.
@@ -18,8 +18,10 @@ from pathlib import Path
 
 import anndata as ad
 import pandas as pd
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.paths import PROCESSED
 
-STANDIN = Path("/workspace/processed/standin")
+STANDIN = PROCESSED / "standin"
 REAL = STANDIN / "real.h5ad"
 WORK = STANDIN / "score_work"
 BASELINE = WORK / "baseline"

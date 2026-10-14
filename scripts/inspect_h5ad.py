@@ -1,11 +1,14 @@
 import sys
+from pathlib import Path
 import anndata as ad
 import numpy as np
 import pandas as pd
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.paths import CONTROLS
 
 path = sys.argv[1]
 adata = ad.read_h5ad(path, backed="r")
-targets = set(pd.read_csv("/root/vcc/controls/pert_counts.csv")["target_gene"])
+targets = set(pd.read_csv(CONTROLS / "pert_counts.csv")["target_gene"])
 
 print("shape (cells, genes):", adata.shape)
 print("obs columns:", list(adata.obs.columns))

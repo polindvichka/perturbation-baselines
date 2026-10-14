@@ -10,6 +10,7 @@ Labels are written to obs['target_gene'] ('non-targeting' for controls). Counts 
 
 Usage: python scripts/build_k562_standin.py
 """
+import sys
 from pathlib import Path
 
 import anndata as ad
@@ -17,9 +18,10 @@ import numpy as np
 import pandas as pd
 from scipy import sparse
 
-CONTROL_DIR = Path("/root/vcc/controls")
-DATA = Path("/workspace/data")
-OUT = Path("/workspace/processed/standin")
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.paths import CONTROLS, DATA, PROCESSED
+
+OUT = PROCESSED / "standin"
 K562_FILE = DATA / "replogle_2022_k562_gwps.h5ad"
 LABEL_COL, CONTROL_LABEL = "gene", "non-targeting"
 MAX_CELLS_PER_PERT = 400
@@ -32,7 +34,7 @@ SEED = 0
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     rng = np.random.default_rng(SEED)
-    targets = set(pd.read_csv(CONTROL_DIR / "pert_counts.csv")["target_gene"])
+    targets = set(pd.read_csv(CONTROLS / "pert_counts.csv")["target_gene"])
     print(f"reading {K562_FILE.name} (backed)", flush=True)
     adata = ad.read_h5ad(K562_FILE, backed="r")
     labels = adata.obs[LABEL_COL].astype(str).to_numpy()

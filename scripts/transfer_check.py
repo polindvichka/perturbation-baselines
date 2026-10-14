@@ -15,24 +15,17 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.data import DeltaTable
+from src.paths import CONTROLS, PROCESSED
 
-CONTROL_DIR = Path("/root/vcc/controls")
-PROCESSED = Path("/workspace/processed")
 MIN_CELLS = 20
 
-genes = pd.read_csv(CONTROL_DIR / "gene_names.csv")["gene_name"].tolist()
-targets = set(pd.read_csv(CONTROL_DIR / "pert_counts.csv")["target_gene"])
+genes = pd.read_csv(CONTROLS / "gene_names.csv")["gene_name"].tolist()
+targets = set(pd.read_csv(CONTROLS / "pert_counts.csv")["target_gene"])
 
 
 def load_k562():
     table = DeltaTable.load(str(PROCESSED / "k562_delta.npz"))
-    rows = None
-    for name in ("perturbations", "perts", "perturbation", "rows", "index", "labels", "names"):
-        if hasattr(table, name):
-            rows = list(getattr(table, name))
-            break
-    if rows is None:
-        raise SystemExit(f"Cannot find the row names. Fields on DeltaTable: {list(vars(table))}")
+    rows = list(table.perts)
     keep = [i for i, r in enumerate(rows) if r in targets]               # only the challenge genes
     position = pd.Index(genes).get_indexer(table.genes)
     found = position >= 0

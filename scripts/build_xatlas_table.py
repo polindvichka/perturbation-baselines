@@ -19,16 +19,18 @@ import pyarrow.compute as pc
 from datasets import load_dataset
 from scipy import sparse
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.paths import CONTROLS, PROCESSED
+
 SPLIT = sys.argv[1]
 MAX_BATCHES = int(sys.argv[2]) if len(sys.argv) > 2 else None
 REPO = "Xaira-Therapeutics/X-Atlas-Orion"
 BATCH = 20_000
 CONTROL_LABEL = "Non-Targeting"
-CONTROL_DIR = Path("/root/vcc/controls")
-OUT = f"/workspace/processed/xatlas_{SPLIT}_delta.npz" if MAX_BATCHES is None else f"/workspace/processed/xatlas_{SPLIT}_trial.npz"
+OUT = PROCESSED / (f"xatlas_{SPLIT}_delta.npz" if MAX_BATCHES is None else f"xatlas_{SPLIT}_trial.npz")
 
-genes = pd.read_csv(CONTROL_DIR / "gene_names.csv")["gene_name"].tolist()
-targets = pd.read_csv(CONTROL_DIR / "pert_counts.csv")["target_gene"].tolist()
+genes = pd.read_csv(CONTROLS / "gene_names.csv")["gene_name"].tolist()
+targets = pd.read_csv(CONTROLS / "pert_counts.csv")["target_gene"].tolist()
 gene_index = {g: i for i, g in enumerate(genes)}
 
 # ---- gene id (token) -> column of our 18,533 challenge genes -------------------

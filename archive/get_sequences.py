@@ -7,13 +7,14 @@ from pathlib import Path
 
 import pandas as pd
 
-sys.path.insert(0, "src")
-from data import DeltaTable
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from src.data import DeltaTable
+from src.paths import CONTROLS, DATA, PROCESSED
 
 URL = ("https://rest.uniprot.org/uniprotkb/stream?compressed=true&format=fasta"
        "&query=%28proteome%3AUP000005640%29+AND+%28reviewed%3Atrue%29")
-FASTA = Path("/workspace/data/uniprot_human.fasta.gz")
-OUT = Path("/workspace/processed/gene_sequences.csv")
+FASTA = DATA / "uniprot_human.fasta.gz"
+OUT = PROCESSED / "gene_sequences.csv"
 
 # 1. Download the file (wget -c resumes if interrupted)
 if not FASTA.exists():
@@ -51,10 +52,10 @@ print("genes with a protein sequence:", len(table))
 print("median protein length:", int(table["length"].median()))
 
 # 3. How many of OUR genes are covered?
-vocab = pd.read_csv("/root/vcc/controls/gene_names.csv")["gene_name"].astype(str)
-challenge = pd.read_csv("/root/vcc/controls/pert_counts.csv")["target_gene"].astype(str)
-k562 = pd.Series(DeltaTable.load("/workspace/processed/k562_delta.npz").perts)
-rpe1 = pd.Series(DeltaTable.load("/workspace/processed/rpe1_delta.npz").perts)
+vocab = pd.read_csv(CONTROLS / "gene_names.csv")["gene_name"].astype(str)
+challenge = pd.read_csv(CONTROLS / "pert_counts.csv")["target_gene"].astype(str)
+k562 = pd.Series(DeltaTable.load(PROCESSED / "k562_delta.npz").perts)
+rpe1 = pd.Series(DeltaTable.load(PROCESSED / "rpe1_delta.npz").perts)
 
 have = set(table["gene"])
 for name, genes in [("challenge genes (300)", challenge), ("K562 knockdowns", k562),

@@ -1,16 +1,18 @@
 import sys
-sys.path.insert(0, "src")
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import Ridge
-from data import DeltaTable
+from src.data import DeltaTable
+from src.paths import CONTROLS, PROCESSED
 
 # 1. Load the K562 table and the gene cards (embeddings)
-table = DeltaTable.load("/workspace/processed/k562_delta.npz")
+table = DeltaTable.load(PROCESSED / "k562_delta.npz")
 delta = table.delta                                   # one row per knockdown, NaN for the knocked-down gene itself
 n_rows, n_genes = delta.shape
-z = np.load("/workspace/processed/esm2_35m.npz", allow_pickle=True)
+z = np.load(PROCESSED / "esm2_35m.npz", allow_pickle=True)
 card_of = {g: i for i, g in enumerate(z["genes"])}
 cards = z["emb"]
 
@@ -24,7 +26,7 @@ for r, gene in enumerate(table.perts):
 print("K562 knockdowns with a card:", int(has_card.sum()), "of", n_rows)
 
 # 3. The same hidden groups as baseline_v0.py
-challenge = pd.read_csv("/root/vcc/controls/pert_counts.csv")["target_gene"].to_numpy()
+challenge = pd.read_csv(CONTROLS / "pert_counts.csv")["target_gene"].to_numpy()
 challenge_rows = np.where(np.isin(table.perts, challenge))[0]
 rng = np.random.default_rng(0)
 groups = np.array_split(rng.permutation(challenge_rows), 5)
