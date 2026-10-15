@@ -117,9 +117,11 @@ class DeltaTable:
                    get("mean_cp10k"), get("basal_cp10k"))
 
 
-def build_delta_table(path, name, pert_col="gene", control=CONTROL_LABEL, chunk=50_000, min_cells=20):
-    """Stream a large backed h5ad and compute per-perturbation mean log1p(CP10K) minus control mean."""
+def build_delta_table(path, name, pert_col="gene", control=CONTROL_LABEL, chunk=50_000, min_cells=20, var_col=None):
+    """Stream a large backed h5ad and compute per-perturbation mean log1p(CP10K) minus control mean.
+    var_col: column of .var holding gene symbols, when the index holds other ids (e.g. Ensembl)."""
     a = ad.read_h5ad(path, backed="r")
+    var_names = pd.Index((a.var[var_col] if var_col else a.var_names).astype(str))
     labels = a.obs[pert_col].astype(str).to_numpy()
     cats, inv = np.unique(labels, return_inverse=True)
     counts = np.bincount(inv, minlength=len(cats))
@@ -140,10 +142,8 @@ def build_delta_table(path, name, pert_col="gene", control=CONTROL_LABEL, chunk=
     keep = (counts >= min_cells) & (np.arange(len(cats)) != ci)
     delta = (means[keep] - basal).astype(np.float32)
     perts = cats[keep]
-    own = pd.Index(a.var_names).get_indexer(perts)      # mask each knockdown's own gene
-    for r, g in enumerate(own):
-        if g >= 0:
-            delta[r, g] = np.nan
-    return DeltaTable(name, np.asarray(a.var_names, dtype=str), perts, delta,
+    for r, p in enumerate(perts):           # mask each knockdown's own gene (every column with that symbol)
+        delta[r, var_names == p] = np.nan
+    return DeltaTable(name, np.asarray(var_names, dtype=str), perts, delta,
                       basal.astype(np.float32), counts[keep],
                       lin_means[keep].astype(np.float32), lin_means[ci].astype(np.float32))
