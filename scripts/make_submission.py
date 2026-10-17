@@ -8,8 +8,16 @@ For every context (A, B, C) and every target gene:
      so the result stays whole numbers, keeps real cell-to-cell variation, and zeros stay zero
      (which keeps the matrix sparse).
 
-Usage: python scripts/make_submission.py [EFFECTS=effects_v1] [SCALE=1.0]
-Writes PROCESSED/submissions/{EFFECTS}_x{SCALE}.h5ad, ready for `vcc prep`.
+MODE (optional):
+  resample  (default) the factor is applied to the 400 drawn cells as they are, so each group's
+            average also carries the chance difference between those 400 cells and all controls
+  exact     each gene's group total is aimed at exactly 400 x (control average) x f, by correcting
+            the factor for what the 400 drawn cells happen to contain; removes most sampling noise
+  exactNN   like exact, but NN% of the cells are left untouched (cells where the knockdown failed);
+            the other cells carry a stronger change so the group total is still the same
+
+Usage: python scripts/make_submission.py [EFFECTS=effects_v1] [SCALE=1.0] [MODE=resample]
+Writes PROCESSED/submissions/{EFFECTS}_x{SCALE}[_{MODE}].h5ad, ready for `vcc prep`.
 """
 import sys
 from pathlib import Path
@@ -24,6 +32,9 @@ from src.paths import CONTROLS, PROCESSED
 
 EFFECTS = sys.argv[1] if len(sys.argv) > 1 else "effects_v1"
 SCALE = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
+MODE = sys.argv[3] if len(sys.argv) > 3 else "resample"
+assert MODE == "resample" or MODE.startswith("exact"), MODE
+NONRESPONDING = int(MODE[5:] or 0) / 100 if MODE.startswith("exact") else 0.0
 CONTEXTS = ["A", "B", "C"]
 N_CELLS = 400
 MAX_FACTOR = 16.0      # cap on any single gene's increase, so one noisy estimate cannot explode
@@ -55,9 +66,21 @@ for ctx in CONTEXTS:
     controls = ad.read_h5ad(CONTROLS / f"context_{ctx}.h5ad")
     assert list(controls.var_names) == list(genes), "control genes are in a different order"
     C = sparse.csr_matrix(controls.X)
+    control_mean = np.asarray(C.mean(axis=0)).ravel()          # average counts per cell, per gene
+    n_off = round(NONRESPONDING * N_CELLS)
     for k, gene in enumerate(targets):
         picked = C[rng.integers(0, C.shape[0], N_CELLS)]      # 400 random control cells
-        blocks.append(apply_effect(picked, factors[k]))
+        if MODE == "resample":
+            blocks.append(apply_effect(picked, factors[k]))
+        else:
+            target_total = N_CELLS * control_mean * factors[k]           # what the group total should be
+            off, on = picked[:n_off], picked[n_off:]
+            off_total = np.asarray(off.sum(axis=0)).ravel()
+            on_total = np.asarray(on.sum(axis=0)).ravel()
+            # factor for the responding cells that lands the group total on target
+            f_on = np.where(on_total > 0, (target_total - off_total) / np.maximum(on_total, 1), factors[k])
+            f_on = np.clip(f_on, 0.0, MAX_FACTOR)
+            blocks.append(sparse.vstack([off, apply_effect(on, f_on)], format="csr"))
         target_col += [gene] * N_CELLS
         context_col += [ctx] * N_CELLS
     print(f"context {ctx} done", flush=True)
@@ -67,7 +90,8 @@ obs = pd.DataFrame({"target_gene": target_col, "context": context_col},
                    index=[f"cell{i}" for i in range(X.shape[0])])
 sub = ad.AnnData(X, obs=obs, var=pd.DataFrame(index=genes))
 
-out = PROCESSED / "submissions" / f"{EFFECTS}_x{SCALE:g}.h5ad"
+suffix = "" if MODE == "resample" else f"_{MODE}"
+out = PROCESSED / "submissions" / f"{EFFECTS}_x{SCALE:g}{suffix}.h5ad"
 out.parent.mkdir(parents=True, exist_ok=True)
 sub.write_h5ad(out)
 print(f"wrote {out}: {sub.shape[0]} cells x {sub.shape[1]} genes, "
