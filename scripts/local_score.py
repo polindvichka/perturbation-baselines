@@ -8,9 +8,10 @@ Then, for each prediction h5ad (perturbed cells only; obs['target_gene']; same g
 Prints the six metrics on the competition scale (0 = generic-response baseline, 1 = real replicate)
 and their plain mean. Each run is appended to PROCESSED/standin/scores.csv.
 
-Notes: DE runs on the CPU engine (pdex), the official leaderboard may use a GPU engine, so use these numbers
-for comparing methods with each other, not as a prediction of the leaderboard value.
+Notes: the DE engine is chosen with the DE_BACKEND environment variable (auto | gpudge | pdex). Check new
+setups against known leaderboard results before trusting the numbers.
 """
+import os
 import shutil
 import subprocess
 import sys
@@ -28,7 +29,8 @@ BASELINE = WORK / "baseline"
 BUNDLE = WORK / "bundle"
 LOG = STANDIN / "scores.csv"
 CELL_EVAL = shutil.which("cell-eval2") or str(Path(sys.executable).parent / "cell-eval2")
-COMMON = ["--preset", "vcc2026", "--pert-col", "target_gene", "--set", "de.backend=pdex"]
+DE_BACKEND = os.environ.get("DE_BACKEND", "auto")      # auto = GPU (gpudge) if available, like the official scorer
+COMMON = ["--preset", "vcc2026", "--pert-col", "target_gene", "--set", f"de.backend={DE_BACKEND}"]
 SHORT = {"pds_cosine": "pds", "expr_mse_unbiased_capped_norm": "mse", "de_wilcoxon_lfc_nmae": "nmae",
          "de_wilcoxon_direction_fidelity_yield_raw": "fid", "de_wilcoxon_direction_reach_raw": "reach",
          "de_wilcoxon_sig_jaccard": "jac"}

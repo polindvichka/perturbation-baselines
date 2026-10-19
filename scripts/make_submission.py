@@ -16,7 +16,12 @@ MODE (optional):
   exactNN   like exact, but NN% of the cells are left untouched (cells where the knockdown failed);
             the other cells carry a stronger change so the group total is still the same
 
-Usage: python scripts/make_submission.py [EFFECTS=effects_v1] [SCALE=1.0] [MODE=resample]
+The renderers live in src/render.py (shared with the stand-in for local scoring).
+
+  tilt      per-cell average from EFFECTS x SCALE, group total from BULK_EFFECTS x BULK_SCALE
+            (see src/render.py)
+
+Usage: python scripts/make_submission.py [EFFECTS=effects_v1] [SCALE=1.0] [MODE=resample] [BULK_EFFECTS BULK_SCALE]
 Writes PROCESSED/submissions/{EFFECTS}_x{SCALE}[_{MODE}].h5ad, ready for `vcc prep`.
 """
 import sys
@@ -29,58 +34,38 @@ from scipy import sparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.paths import CONTROLS, PROCESSED
+from src.render import Renderer
 
 EFFECTS = sys.argv[1] if len(sys.argv) > 1 else "effects_v1"
 SCALE = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
 MODE = sys.argv[3] if len(sys.argv) > 3 else "resample"
-assert MODE == "resample" or MODE.startswith("exact"), MODE
-NONRESPONDING = int(MODE[5:] or 0) / 100 if MODE.startswith("exact") else 0.0
+BULK = (sys.argv[4], float(sys.argv[5])) if MODE == "tilt" else None
 CONTEXTS = ["A", "B", "C"]
 N_CELLS = 400
-MAX_FACTOR = 16.0      # cap on any single gene's increase, so one noisy estimate cannot explode
 SEED = 0
 
 genes = pd.read_csv(CONTROLS / "gene_names.csv")["gene_name"].to_numpy(str)
 targets = pd.read_csv(CONTROLS / "pert_counts.csv")["target_gene"].to_numpy(str)
 z = np.load(PROCESSED / f"{EFFECTS}.npz")
 assert list(z["genes"]) == list(genes) and list(z["perts"]) == list(targets), "effects file is in a different order"
-factors = np.minimum(2.0 ** (SCALE * z["lfc"].astype(np.float64)), MAX_FACTOR)    # (300, 18533)
+lfc = z["lfc"].astype(np.float64)        # (300, 18533), or (3, 300, 18533) with one table per context
+factors = 2.0 ** (SCALE * lfc)
+if BULK:
+    zb = np.load(PROCESSED / f"{BULK[0]}.npz")
+    assert list(zb["genes"]) == list(genes) and list(zb["perts"]) == list(targets), "bulk effects in a different order"
+    bulk_factors = 2.0 ** (BULK[1] * zb["lfc"].astype(np.float64))
 rng = np.random.default_rng(SEED)
-
-
-def apply_effect(X, f):
-    """X: sparse counts (cells x genes); f: one factor per gene. Returns new sparse counts."""
-    X = X.copy()
-    counts = X.data.astype(np.int64)
-    f_of_value = f[X.indices]                       # the factor of each stored value's gene
-    down, up = f_of_value < 1, f_of_value > 1
-    counts[down] = rng.binomial(counts[down], f_of_value[down])
-    counts[up] += rng.poisson(counts[up] * (f_of_value[up] - 1))
-    X.data = counts.astype(np.float32)
-    X.eliminate_zeros()                             # counts thinned to 0 are not stored
-    return X
-
 
 blocks, target_col, context_col = [], [], []
 for ctx in CONTEXTS:
     controls = ad.read_h5ad(CONTROLS / f"context_{ctx}.h5ad")
     assert list(controls.var_names) == list(genes), "control genes are in a different order"
-    C = sparse.csr_matrix(controls.X)
-    control_mean = np.asarray(C.mean(axis=0)).ravel()          # average counts per cell, per gene
-    n_off = round(NONRESPONDING * N_CELLS)
+    renderer = Renderer(controls.X, MODE, rng, n_cells=N_CELLS)
+    pick = lambda F: F[CONTEXTS.index(ctx)] if F.ndim == 3 else F
+    ctx_factors = pick(factors)
+    ctx_bulk = pick(bulk_factors) if BULK else None
     for k, gene in enumerate(targets):
-        picked = C[rng.integers(0, C.shape[0], N_CELLS)]      # 400 random control cells
-        if MODE == "resample":
-            blocks.append(apply_effect(picked, factors[k]))
-        else:
-            target_total = N_CELLS * control_mean * factors[k]           # what the group total should be
-            off, on = picked[:n_off], picked[n_off:]
-            off_total = np.asarray(off.sum(axis=0)).ravel()
-            on_total = np.asarray(on.sum(axis=0)).ravel()
-            # factor for the responding cells that lands the group total on target
-            f_on = np.where(on_total > 0, (target_total - off_total) / np.maximum(on_total, 1), factors[k])
-            f_on = np.clip(f_on, 0.0, MAX_FACTOR)
-            blocks.append(sparse.vstack([off, apply_effect(on, f_on)], format="csr"))
+        blocks.append(renderer.group(ctx_factors[k], None if ctx_bulk is None else ctx_bulk[k]))
         target_col += [gene] * N_CELLS
         context_col += [ctx] * N_CELLS
     print(f"context {ctx} done", flush=True)
@@ -90,7 +75,7 @@ obs = pd.DataFrame({"target_gene": target_col, "context": context_col},
                    index=[f"cell{i}" for i in range(X.shape[0])])
 sub = ad.AnnData(X, obs=obs, var=pd.DataFrame(index=genes))
 
-suffix = "" if MODE == "resample" else f"_{MODE}"
+suffix = "" if MODE == "resample" else f"_{MODE}" + (f"_{BULK[0]}_x{BULK[1]:g}" if BULK else "")
 out = PROCESSED / "submissions" / f"{EFFECTS}_x{SCALE:g}{suffix}.h5ad"
 out.parent.mkdir(parents=True, exist_ok=True)
 sub.write_h5ad(out)

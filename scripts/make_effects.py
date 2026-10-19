@@ -5,13 +5,15 @@ For every source table and every challenge gene it knocked down (with enough cel
 (expression = counts per 10,000, so cells sequenced deeper or shallower are comparable).
 Then, per challenge gene, the mean over the sources that have it.
 
-Writes PROCESSED/effects_v1.npz with
+Writes PROCESSED/{OUT}.npz (default effects_v1) with
     perts      (300,)          the challenge genes, in pert_counts.csv order
     genes      (18533,)        the challenge gene axis, in gene_names.csv order
     lfc        (300, 18533)    float32; 0 where no source measured that gene
     n_sources  (300,)          how many sources went into each row
+    n_up, n_down (300, 18533)  how many sources saw that gene go up / down
 
-Usage: python scripts/make_effects.py
+Usage: python scripts/make_effects.py [OUT=effects_v1] [SOURCE ...]
+  SOURCE  names from SOURCES below (default: all), e.g. leave out k562 to use K562 as a stand-in context
 """
 import sys
 from pathlib import Path
@@ -33,7 +35,12 @@ SOURCES = {
     "h1_train": "h1_train_delta.npz",
     "h1_val": "h1_val_delta.npz",
     "h1_test": "h1_test_delta.npz",
+    "cd4": "cd4_lfc.npz",               # scripts/build_cd4_table.py; already log2 FC, 10x Flex
 }
+
+OUT = sys.argv[1] if len(sys.argv) > 1 else "effects_v1"
+if len(sys.argv) > 2:
+    SOURCES = {name: SOURCES[name] for name in sys.argv[2:]}
 
 challenge_genes = pd.read_csv(CONTROLS / "gene_names.csv")["gene_name"]
 targets = pd.read_csv(CONTROLS / "pert_counts.csv")["target_gene"]
@@ -44,6 +51,9 @@ def load_lfc(file):
     z = np.load(PROCESSED / file)
     # 1. which rows to keep: our genes, with enough cells
     keep = np.isin(z["perts"], targets) & (z["n_cells"] >= MIN_CELLS)
+    if "lfc" in z.files:                                           # source that already holds log2 FCs (CD4)
+        df = pd.DataFrame(z["lfc"][keep], index=z["perts"][keep], columns=z["genes"])
+        return df.reindex(columns=challenge_genes)
     knockdown = z["mean_cp10k"][keep]                              # (rows kept, genes of this source)
     # the two kinds of table name the control average differently
     control = z["basal_cp10k"] if "basal_cp10k" in z.files else z["control_cp10k"]
@@ -70,10 +80,14 @@ stacked = pd.concat(parts)
 effects = stacked.groupby(level=0).mean().reindex(targets)
 n_sources = stacked.index.value_counts().reindex(targets).fillna(0).astype(int)
 lfc = effects.fillna(0).to_numpy(np.float32)                       # nothing measured -> no change
+# per gene and measured gene: how many sources saw it go up, and how many down (for confidence)
+n_up = (stacked > 0).groupby(level=0).sum().reindex(targets).fillna(0).to_numpy(np.int8)
+n_down = (stacked < 0).groupby(level=0).sum().reindex(targets).fillna(0).to_numpy(np.int8)
 
-np.savez_compressed(PROCESSED / "effects_v1.npz", perts=targets.to_numpy(str),
-                    genes=challenge_genes.to_numpy(str), lfc=lfc, n_sources=n_sources.to_numpy())
+np.savez_compressed(PROCESSED / f"{OUT}.npz", perts=targets.to_numpy(str),
+                    genes=challenge_genes.to_numpy(str), lfc=lfc, n_sources=n_sources.to_numpy(),
+                    n_up=n_up, n_down=n_down)
 print("\nsources per gene:", n_sources.value_counts().sort_index().to_dict())
 print("shape:", lfc.shape)
 print("ACLY ->", effects.loc["ACLY", ["HMGCS1", "IDI1", "LDLR", "ACLY"]].round(2).to_dict())
-print("wrote", PROCESSED / "effects_v1.npz")
+print("wrote", PROCESSED / f"{OUT}.npz")
