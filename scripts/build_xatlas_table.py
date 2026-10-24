@@ -20,7 +20,7 @@ from datasets import load_dataset
 from scipy import sparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.paths import CONTROLS, PROCESSED
+from src.paths import CONTROLS, PROCESSED, all_targets
 
 SPLIT = sys.argv[1]
 MAX_BATCHES = int(sys.argv[2]) if len(sys.argv) > 2 else None
@@ -31,7 +31,7 @@ PROCESSED.mkdir(parents=True, exist_ok=True)
 OUT = PROCESSED / (f"xatlas_{SPLIT}_delta.npz" if MAX_BATCHES is None else f"xatlas_{SPLIT}_trial.npz")
 
 genes = pd.read_csv(CONTROLS / "gene_names.csv")["gene_name"].tolist()
-targets = pd.read_csv(CONTROLS / "pert_counts.csv")["target_gene"].tolist()
+targets = all_targets()                    # the knockdowns of both panels (A/B/C and D/E/F)
 gene_index = {g: i for i, g in enumerate(genes)}
 
 # ---- gene id (token) -> column of our 18,533 challenge genes -------------------

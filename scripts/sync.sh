@@ -18,6 +18,6 @@ if [ "${1:-push}" = "pull" ]; then
 else
     rsync -av --delete -e "$SSH" \
         --exclude .git/ --exclude .venv/ --exclude __pycache__/ --exclude .DS_Store \
-        --exclude data/ --exclude processed/ --exclude controls/ --exclude notes/ \
+        --exclude data/ --exclude processed/ --exclude controls/ --exclude controls_final/ --exclude notes/ \
         ./ "$HOST:$REMOTE_REPO/"
 fi

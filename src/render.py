@@ -16,6 +16,16 @@ tilt       two targets per gene: `factor` for the per-cell average (what the DE 
            see, every cell weighted equally) and `bulk_factor` for the group total (what mse and pds see,
            deeper cells weigh more). The change is applied more strongly in shallow cells and more
            weakly in deep cells so both targets are met; group totals are then made exact.
+<mode>steerN  e.g. exact15steer3000: render with <mode>, then for each group pick the N genes with the largest
+           predicted change in the scorer's space (among genes with enough counts to test) and steer the
+           significance test toward the predicted direction WITHOUT changing the gene's group total:
+             up    the gene's counts are spread evenly over the cells (fewer zeros, higher ranks)
+             down  half of the cells that have the gene are emptied into the others (more zeros, lower ranks)
+           Picked genes also get at least a 5% change in their direction, which sets the sign of the fold change
+           the scorer reads. Why: fid is, per knockdown, correct calls / max(our calls, real calls), so calling
+           too few genes scores below chance; mse and pds only see group totals, which steering leaves exact.
+           Tested 2026-10-20 on context A controls: 91% of up- and 99% of down-steered genes became significant,
+           all in the steered direction; 4% of untouched genes were called (cells' depths shift slightly).
 """
 import numpy as np
 from scipy import sparse
@@ -39,6 +49,8 @@ class Renderer:
     """Holds one context's control cells and makes groups of generated cells from them."""
 
     def __init__(self, controls, mode, rng, n_cells=400, max_factor=16.0):
+        mode, _, steer = mode.partition("steer")
+        self.n_steer = int(steer) if steer else 0
         self.C = sparse.csr_matrix(controls, dtype=np.float32)
         self.mode, self.rng, self.n, self.max_factor = mode, rng, n_cells, max_factor
         self.mean = np.asarray(self.C.mean(axis=0)).ravel()            # average counts per cell
@@ -53,9 +65,18 @@ class Renderer:
             pass
         else:
             assert mode == "resample", mode
+        if self.n_steer:
+            self.cp10k = self.mean / self.lib.mean() * 1e4
+            self.steerable = self.mean * n_cells >= 40          # at least ~40 counts in a group of 400
 
     def group(self, factor, bulk_factor=None):
         factor = np.minimum(factor, self.max_factor)
+        if self.n_steer:
+            factor, up, down = self._pick(factor)
+            return self._steer(self._render(factor, bulk_factor), up, down)
+        return self._render(factor, bulk_factor)
+
+    def _render(self, factor, bulk_factor=None):
         if self.mode == "tilt":
             return self._tilted(factor, np.minimum(bulk_factor, self.max_factor))
         if self.mode == "resample":
@@ -63,6 +84,43 @@ class Renderer:
         if self.mode.startswith("exact"):
             return self._exact(factor)
         return self._pooled(factor)
+
+    def _pick(self, factor):
+        """The genes to steer (largest predicted change in log1p(5 * CP10K)) and their nudged factors."""
+        change = np.abs(np.log1p(5 * self.cp10k * factor) - np.log1p(5 * self.cp10k))
+        change[~self.steerable | (factor == 1.0)] = -1
+        picked = np.argsort(-change)[:self.n_steer]
+        picked = picked[change[picked] > 0]
+        f = factor.copy()
+        up, down = picked[factor[picked] > 1], picked[factor[picked] < 1]
+        f[up], f[down] = np.maximum(f[up], 1.05), np.minimum(f[down], 0.95)
+        return f, up, down
+
+    def _steer(self, X, up, down):
+        """Spread (up) or concentrate (down) each picked gene's counts across cells; group totals unchanged."""
+        M = X.toarray()
+        n = M.shape[0]
+        if len(up):
+            U = M[:, up].astype(np.int64)
+            S = U.sum(0)
+            base = S // n
+            rest = S - base * n
+            rank = np.argsort(np.argsort(self.rng.random(U.shape), axis=0), axis=0)
+            M[:, up] = base[None, :] + (rank < rest[None, :])
+        if len(down):
+            D = M[:, down].astype(np.int64)
+            empty = (D > 0) & (self.rng.random(D.shape) < 0.5)
+            kept = np.where(empty, 0, D)
+            moved = (D * empty).sum(0)
+            kept_sum = kept.sum(0)
+            ok = kept_sum > 0                                       # genes with somewhere to move counts to
+            share = np.where(ok, kept / np.maximum(kept_sum, 1), 0) * moved
+            add = np.floor(share).astype(np.int64)
+            rest = moved - add.sum(0)
+            order = np.argsort(np.argsort(-(share - add), axis=0), axis=0)
+            add += (order < rest[None, :]) & (kept > 0)
+            M[:, down] = np.where(ok[None, :], kept + add, D)
+        return sparse.csr_matrix(M.astype(np.float32))
 
     def _draw(self, m):
         return self.C[self.rng.integers(0, self.C.shape[0], m)]

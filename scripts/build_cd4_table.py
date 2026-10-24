@@ -20,11 +20,11 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.paths import CONTROLS, DATA, PROCESSED
+from src.paths import CONTROLS, DATA, PROCESSED, all_targets
 
 KEEP_ALL = len(sys.argv) > 1
 genes = pd.read_csv(CONTROLS / "gene_names.csv")["gene_name"]
-targets = set(pd.read_csv(CONTROLS / "pert_counts.csv")["target_gene"])
+targets = set(all_targets())               # the knockdowns of both panels (A/B/C and D/E/F)
 
 a = ad.read_h5ad(DATA / "cd4" / "GWCD4i.DE_stats.h5ad")
 obs = a.obs

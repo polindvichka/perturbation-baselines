@@ -33,14 +33,13 @@ import pandas as pd
 from scipy import sparse
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.paths import CONTROLS, PROCESSED
+from src.paths import CONTEXTS, CONTROLS, PROCESSED
 from src.render import Renderer
 
 EFFECTS = sys.argv[1] if len(sys.argv) > 1 else "effects_v1"
 SCALE = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
 MODE = sys.argv[3] if len(sys.argv) > 3 else "resample"
 BULK = (sys.argv[4], float(sys.argv[5])) if MODE == "tilt" else None
-CONTEXTS = ["A", "B", "C"]
 N_CELLS = 400
 SEED = 0
 

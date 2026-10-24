@@ -6,6 +6,7 @@ __pycache__/
 
 # data and outputs (live under $VCC_DATA, see src/paths.py)
 controls/
+controls_final/
 data/
 processed/
 *.h5ad
