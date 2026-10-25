@@ -22,7 +22,7 @@ tilt       two targets per gene: `factor` for the per-cell average (what the DE 
              up    the gene's counts are spread evenly over the cells (fewer zeros, higher ranks)
              down  half of the cells that have the gene are emptied into the others (more zeros, lower ranks)
            Picked genes also get at least a 5% change in their direction, which sets the sign of the fold change
-           the scorer reads. Why: fid is, per knockdown, correct calls / max(our calls, real calls), so calling
+           the scorer reads (steerNnP sets that to P%, e.g. steer3000n2; n0 = no nudge). Why: fid is, per knockdown, correct calls / max(our calls, real calls), so calling
            too few genes scores below chance; mse and pds only see group totals, which steering leaves exact.
            Tested 2026-10-20 on context A controls: 91% of up- and 99% of down-steered genes became significant,
            all in the steered direction; 4% of untouched genes were called (cells' depths shift slightly).
@@ -50,7 +50,9 @@ class Renderer:
 
     def __init__(self, controls, mode, rng, n_cells=400, max_factor=16.0):
         mode, _, steer = mode.partition("steer")
+        steer, _, nudge = steer.partition("n")
         self.n_steer = int(steer) if steer else 0
+        self.nudge = float(nudge) / 100 if nudge else 0.05
         self.C = sparse.csr_matrix(controls, dtype=np.float32)
         self.mode, self.rng, self.n, self.max_factor = mode, rng, n_cells, max_factor
         self.mean = np.asarray(self.C.mean(axis=0)).ravel()            # average counts per cell
@@ -93,7 +95,7 @@ class Renderer:
         picked = picked[change[picked] > 0]
         f = factor.copy()
         up, down = picked[factor[picked] > 1], picked[factor[picked] < 1]
-        f[up], f[down] = np.maximum(f[up], 1.05), np.minimum(f[down], 0.95)
+        f[up], f[down] = np.maximum(f[up], 1 + self.nudge), np.minimum(f[down], 1 - self.nudge)
         return f, up, down
 
     def _steer(self, X, up, down):
