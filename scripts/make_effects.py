@@ -22,7 +22,7 @@ import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.paths import CONTROLS, PROCESSED
+from src.paths import CONTROLS, PROCESSED, SUFFIX, is_holdout
 
 EPS = 0.1          # keeps genes with almost no counts from giving huge fake fold changes
 MIN_CELLS = 20     # fewer cells than this = too noisy to use
@@ -41,6 +41,8 @@ SOURCES = {
 OUT = sys.argv[1] if len(sys.argv) > 1 else "effects_v1"
 if len(sys.argv) > 2:
     SOURCES = {name: SOURCES[name] for name in sys.argv[2:]}
+SOURCES = {name: f for name, f in SOURCES.items() if not is_holdout(name)}   # a stand-in never sees its own data
+OUT += SUFFIX
 
 challenge_genes = pd.read_csv(CONTROLS / "gene_names.csv")["gene_name"]
 targets = pd.read_csv(CONTROLS / "pert_counts.csv")["target_gene"]
@@ -89,5 +91,4 @@ np.savez_compressed(PROCESSED / f"{OUT}.npz", perts=targets.to_numpy(str),
                     n_up=n_up, n_down=n_down)
 print("\nsources per gene:", n_sources.value_counts().sort_index().to_dict())
 print("shape:", lfc.shape)
-print("ACLY ->", effects.loc["ACLY", ["HMGCS1", "IDI1", "LDLR", "ACLY"]].round(2).to_dict())
 print("wrote", PROCESSED / f"{OUT}.npz")

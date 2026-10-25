@@ -1,9 +1,11 @@
 """Score a prediction locally with the official cell-eval2 'vcc2026' scorer against a stand-in context.
 
-One-off setup (about 10-30 minutes; builds the generic-response baseline and replicate anchors):
-    python scripts/local_score.py prepare
-Then, for each prediction h5ad (perturbed cells only; obs['target_gene']; same genes as real.h5ad):
-    python scripts/local_score.py score $VCC_DATA/processed/standin/pred_xxx.h5ad
+The stand-in is chosen with VCC_PANEL (h1, k562; built by scripts/build_standin.py).
+One-off setup per panel (about 10-30 minutes; builds the generic-response baseline and replicate anchors):
+    VCC_PANEL=h1 python scripts/local_score.py prepare
+Then, for each prediction h5ad (perturbed cells only; obs['target_gene']), e.g. from make_submission.py:
+    VCC_PANEL=h1 python scripts/local_score.py score $VCC_DATA/processed/submissions/xxx.h5ad [LABEL]
+The prediction is cut down to the genes the stand-in measured.
 
 Prints the six metrics on the competition scale (0 = generic-response baseline, 1 = real replicate)
 and their plain mean. Each run is appended to PROCESSED/standin/scores.csv.
@@ -20,9 +22,7 @@ from pathlib import Path
 import anndata as ad
 import pandas as pd
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from src.paths import PROCESSED
-
-STANDIN = PROCESSED / "standin"
+from src.paths import STANDIN
 REAL = STANDIN / "real.h5ad"
 WORK = STANDIN / "score_work"
 BASELINE = WORK / "baseline"
@@ -59,12 +59,14 @@ def score(pred_path, label=None):
     real = ad.read_h5ad(REAL)
     ctrl = real[real.obs["target_gene"] == "non-targeting"]
     pred = ad.read_h5ad(pred_path)
+    pred = ad.AnnData(pred[:, real.var_names].X, obs=pred.obs[["target_gene"]], var=real.var.copy())
     both = ad.concat([pred, ctrl])
     both.obs_names_make_unique()
-    run_in = WORK / "pred_with_controls.h5ad"
+    run_in = WORK / f"pred_with_controls_{label}.h5ad"
     both.write_h5ad(run_in)
     out = WORK / f"run_{label}"
     sh([CELL_EVAL, "run", "-ap", run_in, "-ar", REAL, "-o", out, *COMMON])
+    run_in.unlink()                                    # several GB; only needed during the run
     scored = out / "scored.csv"
     sh([CELL_EVAL, "score", "--user-agg", out / "agg_results.csv", "--real-bundle", BUNDLE, "-o", scored])
     df = pd.read_csv(scored).set_index("metric")
