@@ -5,6 +5,12 @@ One-off setup per panel (about 10-30 minutes; builds the generic-response baseli
     VCC_PANEL=h1 python scripts/local_score.py prepare
 Then, for each prediction h5ad (perturbed cells only; obs['target_gene']), e.g. from make_submission.py:
     VCC_PANEL=h1 python scripts/local_score.py score $VCC_DATA/processed/submissions/xxx.h5ad [LABEL]
+or, for the mse metric alone (no DE tests; ~7 minutes instead of ~50 on H1):
+    VCC_PANEL=h1 python scripts/local_score.py mse $VCC_DATA/processed/submissions/xxx.h5ad [LABEL]
+  prints the raw value (1.0 = predicting the control) and the scaled score; appended to mse_scores.csv
+  also prints the scorer's own notes on the sampling-noise credit (metrics/delta.py): how many knockdowns had
+  the credit capped at the real side's noise, and how far it was scaled down because the predictions' spread
+  across knockdowns was smaller than the credit claimed (no note = full credit)
 The prediction is cut down to the genes the stand-in measured.
 
 Prints the six metrics on the competition scale (0 = generic-response baseline, 1 = real replicate)
@@ -42,7 +48,7 @@ def sh(args):
     if r.returncode != 0:
         print(r.stdout[-3000:], r.stderr[-3000:])
         raise SystemExit(f"command failed: {args[1]}")
-    return r.stdout
+    return r.stdout + r.stderr
 
 
 def prepare():
@@ -53,7 +59,13 @@ def prepare():
     print("ready:", BUNDLE)
 
 
-def score(pred_path, label=None):
+# the scorer with its INFO notes shown (it logs the credit's caps and scaling only at INFO)
+CELL_EVAL_NOTES = [sys.executable, "-c", "import logging, sys; logging.basicConfig(level=logging.INFO, "
+                   "format='%(message)s'); from cell_eval2.cli import main; sys.exit(main())"]
+MSE_METRICS = "metrics=[expr_mse_unbiased_capped,expr_distance_unbiased,expr_mse_unbiased_capped_norm]"
+
+
+def score(pred_path, label=None, mse_only=False):
     pred_path = Path(pred_path)
     label = label or pred_path.stem
     real = ad.read_h5ad(REAL)
@@ -64,9 +76,24 @@ def score(pred_path, label=None):
     both.obs_names_make_unique()
     run_in = WORK / f"pred_with_controls_{label}.h5ad"
     both.write_h5ad(run_in)
-    out = WORK / f"run_{label}"
-    sh([CELL_EVAL, "run", "-ap", run_in, "-ar", REAL, "-o", out, *COMMON])
+    out = WORK / f"{'mse' if mse_only else 'run'}_{label}"
+    if mse_only:
+        notes = sh([*CELL_EVAL_NOTES, "run", "-ap", run_in, "-ar", REAL, "-o", out, *COMMON, "--set", MSE_METRICS])
+        for line in notes.splitlines():
+            if "sampling correction" in line or "across-perturbation spread" in line:
+                print("  scorer:", line.strip())
+    else:
+        sh([CELL_EVAL, "run", "-ap", run_in, "-ar", REAL, "-o", out, *COMMON])
     run_in.unlink()                                    # several GB; only needed during the run
+    if mse_only:
+        raw = float(pd.read_csv(out / "agg_results.csv").set_index("statistic")
+                    .loc["mean", "expr_mse_unbiased_capped_norm"])
+        base = float(pd.read_csv(BASELINE / "baseline_agg.csv").set_index("statistic")
+                     .loc["mean", "expr_mse_unbiased_capped_norm"])
+        print(f"\n{label}: raw mse {raw:.4f} (baseline {base:.4f}; lower is better)")
+        pd.DataFrame([{"label": label, "raw_mse": round(raw, 4), "baseline": round(base, 4)}]).to_csv(
+            STANDIN / "mse_scores.csv", mode="a", header=not (STANDIN / "mse_scores.csv").exists(), index=False)
+        return
     scored = out / "scored.csv"
     sh([CELL_EVAL, "score", "--user-agg", out / "agg_results.csv", "--real-bundle", BUNDLE, "-o", scored])
     df = pd.read_csv(scored).set_index("metric")
@@ -82,7 +109,7 @@ def score(pred_path, label=None):
 if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "prepare":
         prepare()
-    elif len(sys.argv) >= 3 and sys.argv[1] == "score":
-        score(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None)
+    elif len(sys.argv) >= 3 and sys.argv[1] in ("score", "mse"):
+        score(sys.argv[2], sys.argv[3] if len(sys.argv) > 3 else None, mse_only=sys.argv[1] == "mse")
     else:
         raise SystemExit(__doc__)
