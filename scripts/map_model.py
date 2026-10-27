@@ -26,7 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from src.paths import PANEL_DIRS, PROCESSED
 from src.proxy import best_scale, scores
 
-MODE = sys.argv[1] if len(sys.argv) > 1 else None      # None when imported (scripts/pds_ideas.py)
+MODE = sys.argv[1] if __name__ == "__main__" and len(sys.argv) > 1 else None   # None when imported
 K = int(sys.argv[2]) if len(sys.argv) > 2 else 100
 ALPHA = float(sys.argv[3]) if len(sys.argv) > 3 else 10.0
 EPS, MIN_CELLS, MIN_EXPR = 0.1, 20, 0.05

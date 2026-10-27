@@ -29,8 +29,12 @@ Modes
   dir_final ridge + direction head for contexts A, B, C: confident genes keep the ridge change, the others get
             OTHER_SHARE of it (default 1/7) -> PROCESSED/effects_ridge_gated.npz (use with SCALE 7)
 
-Usage: python scripts/transfer_model.py cv|ridge_cv|ridge_standin|ridge_final|standin|final|dir_cv|dir_final [OTHER_SHARE]
+With WITH_PAN=1 the H1 source also holds the H1 hESC screens of Pan et al. (scripts/build_pan_table.py), and the
+pk outputs are named effects_ridgepk_pan{SUFFIX}.npz. A stand-in panel made from H1 hides both.
+
+Usage: [WITH_PAN=1] python scripts/transfer_model.py cv|ridge_cv|ridge_standin|ridge_final|standin|final|dir_cv|dir_final [OTHER_SHARE]
 """
+import os
 import sys
 from pathlib import Path
 
@@ -49,6 +53,9 @@ ROWS_PER_FOLD = 3_000_000  # random subsample of training examples per hidden li
 SEED = 0
 FILES = {"k562": "k562_delta.npz", "hct116": "xatlas_HCT116_delta.npz", "hek293t": "xatlas_HEK293T_delta.npz",
          "h1": ["h1_train_delta.npz", "h1_val_delta.npz", "h1_test_delta.npz"], "cd4": "cd4_lfc.npz"}
+TAG = "_pan" if os.environ.get("WITH_PAN") == "1" else ""
+if TAG:
+    FILES["h1"].append("pan_lfc.npz")
 FILES = {k: v for k, v in FILES.items() if not is_holdout(k)}      # a stand-in panel never sees its own data
 LABEL_LINES = [k for k in ["k562", "hct116", "hek293t"] if k in FILES]
 PARAMS = dict(objective="regression", learning_rate=0.05, num_leaves=63, min_data_in_leaf=500,
@@ -438,7 +445,7 @@ elif MODE in ("pk_cv", "pk_standin", "pk_final"):
                 rel = relative_strength(coef, glob, knockdown_inputs(DATA, e, r))
                 preds.append((rel[:, None] * r).astype(np.float32))
                 print(f"context {ctx}: strength range {rel.min():.2f}-{rel.max():.2f}, median {np.median(rel):.2f}", flush=True)
-            out = PROCESSED / f"effects_ridgepk{SUFFIX}.npz"
+            out = PROCESSED / f"effects_ridgepk{TAG}{SUFFIX}.npz"
             np.savez_compressed(out, perts=targets.to_numpy(str), genes=genes.to_numpy(str), lfc=np.stack(preds),
                                 contexts=np.array(CONTEXTS))
         print("wrote", out, flush=True)
