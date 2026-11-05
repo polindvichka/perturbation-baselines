@@ -10,9 +10,10 @@ Everything sits under one folder, set with the VCC_DATA environment variable
     $VCC_DATA/processed/        everything we compute: effect tables, predictions, local scores
 
 Which panel a script works on is chosen with VCC_PANEL: `val` (default, controls/), `test` (controls_final/),
-or a local stand-in panel (`h1`, `k562`; built by scripts/build_standin.py into controls_<name>/, scored with
-scripts/local_score.py). CONTEXTS lists that panel's contexts, and SUFFIX ("" or "_<panel>") is added to the
-names of panel-specific outputs (effects, submissions), so panels never overwrite each other.
+or a local stand-in panel: `h1`, `k562` (cells; scripts/build_standin.py, scored with scripts/local_score.py) or
+`rpe1`, `jurkat`, `hepg2`, `hct116`, `hek293t` (tables only; scripts/build_table_panel.py, for scripts/mse_check.py).
+CONTEXTS lists that panel's contexts, and SUFFIX ("" or "_<panel>") is added to the names of panel-specific
+outputs (effects, submissions), so panels never overwrite each other.
 HOLDOUT is the public source a stand-in panel was made from: it must not be used as evidence for itself.
 """
 import json
@@ -23,7 +24,9 @@ REPO = Path(__file__).resolve().parent.parent
 ROOT = Path(os.environ.get("VCC_DATA", REPO))
 DATA = ROOT / "data"
 PROCESSED = ROOT / "processed"
-STANDIN_PANELS = {"h1": "h1", "k562": "k562"}          # stand-in panel -> the source it is made from
+STANDIN_PANELS = {"h1": "h1", "k562": "k562",            # stand-in panel -> the source it is made from
+                  "rpe1": "rpe1", "jurkat": "jurkat", "hepg2": "hepg2",   # table-only panels
+                  "hct116": "hct116", "hek293t": "hek293t"}               # (scripts/build_table_panel.py)
 PANEL_DIRS = {"val": ROOT / "controls", "test": ROOT / "controls_final",
               **{p: ROOT / f"controls_{p}" for p in STANDIN_PANELS}}
 

@@ -69,19 +69,28 @@ def effects():
             run(args, STANDIN / f"build_{name}.log")
 
 
+def render(n):
+    if not submission(n).exists():
+        run(["scripts/make_submission.py", RECIPES[n][0] + SUFFIX, str(RECIPES[n][1]), RECIPES[n][2]],
+            STANDIN / f"render_{n}.log")
+
+
 def build():
     effects()
-    todo = [n for n in RECIPES if not submission(n).exists()]
     with ThreadPoolExecutor(N_PARALLEL) as ex:
-        list(ex.map(lambda n: run(["scripts/make_submission.py", RECIPES[n][0] + SUFFIX, str(RECIPES[n][1]), RECIPES[n][2]],
-                                  STANDIN / f"render_{n}.log"), todo))
-    print("rendered", todo, flush=True)
+        list(ex.map(render, RECIPES))
+    print("rendered", list(RECIPES), flush=True)
 
 
-def score():
-    with ThreadPoolExecutor(N_PARALLEL) as ex:
-        list(ex.map(lambda n: run(["scripts/local_score.py", "score", str(submission(n)), f"exam_{n}"],
-                                  STANDIN / f"score_{n}.log"), RECIPES))
+def score(n):
+    run(["scripts/local_score.py", "score", str(submission(n)), f"exam_{n}"], STANDIN / f"score_{n}.log")
+
+
+def render_score_delete(n):
+    """One recipe at a time, so at most N_PARALLEL predictions (several GB each) sit on disk."""
+    render(n)
+    score(n)
+    submission(n).unlink()
 
 
 def report():
@@ -107,9 +116,14 @@ def report():
 if __name__ == "__main__":
     if STEP == "effects":
         effects()
-    if STEP in ("build", "all"):
+    if STEP == "build":
         build()
-    if STEP in ("score", "all"):
-        score()
+    if STEP == "score":
+        with ThreadPoolExecutor(N_PARALLEL) as ex:
+            list(ex.map(score, RECIPES))
+    if STEP == "all":
+        effects()
+        with ThreadPoolExecutor(N_PARALLEL) as ex:
+            list(ex.map(render_score_delete, RECIPES))
     if STEP in ("report", "all"):
         report()
