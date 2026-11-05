@@ -7,6 +7,9 @@ resample   draw cells, change each count by the factor (binomial thinning / Pois
 exact      like resample, but the factor is corrected so each gene's group total lands on
            n_cells x control_mean x factor (removes the chance difference of the drawn cells)
 exactNN    like exact, with NN% of cells left untouched (cells where the knockdown failed)
+exactNNd   like exactNN, but the untouched cells are the SHALLOWEST ones: the group total (what mse and pds
+           read; deep cells weigh more) gets the full change while the per-cell average (what DE fold changes
+           and nmae read; every cell weighs the same) moves less
 poolK      each generated cell is the average profile of K control cells, scaled to that average
            depth, with exact group totals and random rounding to whole numbers.
            WARNING: tested 2026-10-19 on context A with no change applied: about half of all expressed
@@ -22,7 +25,10 @@ tilt       two targets per gene: `factor` for the per-cell average (what the DE 
              up    the gene's counts are spread evenly over the cells (fewer zeros, higher ranks)
              down  half of the cells that have the gene are emptied into the others (more zeros, lower ranks)
            Picked genes also get at least a 5% change in their direction, which sets the sign of the fold change
-           the scorer reads (steerNnP sets that to P%, e.g. steer3000n2; n0 = no nudge). Why: fid is, per knockdown, correct calls / max(our calls, real calls), so calling
+           the scorer reads (steerNnP sets that to P%, e.g. steer3000n2; n0 = no nudge).
+           A trailing r (e.g. steer6000n0r) spreads up genes RANDOMLY (each count to a random cell, Poisson-like)
+           instead of perfectly evenly: the scorer's mse credits the cells' own scatter (metrics/delta.py,
+           "an UNDER-dispersed submission reads WORSE"), and a perfectly even spread has none. Why: fid is, per knockdown, correct calls / max(our calls, real calls), so calling
            too few genes scores below chance; mse and pds only see group totals, which steering leaves exact.
            Tested 2026-10-20 on context A controls: 91% of up- and 99% of down-steered genes became significant,
            all in the steered direction; 4% of untouched genes were called (cells' depths shift slightly).
@@ -50,7 +56,8 @@ class Renderer:
 
     def __init__(self, controls, mode, rng, n_cells=400, max_factor=16.0):
         mode, _, steer = mode.partition("steer")
-        steer, _, nudge = steer.partition("n")
+        self.random_up = steer.endswith("r")
+        steer, _, nudge = steer.rstrip("r").partition("n")
         self.n_steer = int(steer) if steer else 0
         self.nudge = float(nudge) / 100 if nudge else 0.05
         self.C = sparse.csr_matrix(controls, dtype=np.float32)
@@ -62,7 +69,8 @@ class Renderer:
             self.props = sparse.diags(1.0 / np.maximum(self.lib, 1)) @ self.C   # per-cell profile
             self.props = self.props.tocsr()
         elif mode.startswith("exact"):
-            self.off = round(int(mode[5:] or 0) / 100 * n_cells)
+            self.deep = mode.endswith("d")
+            self.off = round(int(mode[5:].rstrip("d") or 0) / 100 * n_cells)
         elif mode == "tilt":
             pass
         else:
@@ -102,7 +110,12 @@ class Renderer:
         """Spread (up) or concentrate (down) each picked gene's counts across cells; group totals unchanged."""
         M = X.toarray()
         n = M.shape[0]
-        if len(up):
+        if len(up) and self.random_up:
+            S = M[:, up].astype(np.int64).sum(0)
+            gene = np.repeat(np.arange(len(up)), S)                   # one entry per count
+            cell = self.rng.integers(0, n, len(gene))
+            M[:, up] = np.bincount(cell * len(up) + gene, minlength=n * len(up)).reshape(n, len(up))
+        elif len(up):
             U = M[:, up].astype(np.int64)
             S = U.sum(0)
             base = S // n
@@ -130,12 +143,20 @@ class Renderer:
     def _exact(self, factor):
         picked = self._draw(self.n)
         target = self.n * self.mean * factor                            # what the group total should be
+        if self.deep:                                                   # shallowest cells first
+            picked = picked[np.argsort(np.asarray(picked.sum(axis=1)).ravel(), kind="stable")]
         off, on = picked[:self.off], picked[self.off:]
         off_total = np.asarray(off.sum(axis=0)).ravel()
         on_total = np.asarray(on.sum(axis=0)).ravel()
         # factor for the responding cells that lands the group total on target
         f_on = np.where(on_total > 0, (target - off_total) / np.maximum(on_total, 1), factor)
         f_on = np.clip(f_on, 0.0, self.max_factor)
+        # a target below what the non-responders already hold cannot be reached by the responders alone (their
+        # counts cannot go below 0): thin the non-responders too, so the group total still lands on target
+        short = target < off_total
+        if short.any():
+            f_off = np.where(short, target / np.maximum(off_total, 1), 1.0)
+            off = apply_effect(off, f_off, self.rng)
         return sparse.vstack([off, apply_effect(on, f_on, self.rng)], format="csr")
 
     def _tilted(self, f_cell, f_bulk):

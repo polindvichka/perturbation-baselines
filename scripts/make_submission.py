@@ -39,7 +39,7 @@ from src.render import Renderer
 EFFECTS = sys.argv[1] if len(sys.argv) > 1 else "effects_v1"
 SCALE = float(sys.argv[2]) if len(sys.argv) > 2 else 1.0
 MODE = sys.argv[3] if len(sys.argv) > 3 else "resample"
-BULK = (sys.argv[4], float(sys.argv[5])) if MODE == "tilt" else None
+BULK = (sys.argv[4], float(sys.argv[5])) if MODE.startswith("tilt") else None
 N_CELLS = 400
 SEED = 0
 

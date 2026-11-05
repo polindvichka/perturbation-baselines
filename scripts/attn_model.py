@@ -24,7 +24,7 @@ Modes
           gene is copied from it; genes outside the model's gene set stay 0. N_SEEDS > 1 averages that many
           models (seeds SEED, SEED+1, ...) -> effects_attn_ens{N}{SUFFIX}.npz.
 
-Usage: [SEED=0] [N_SEEDS=1] VCC_PANEL=test python scripts/attn_model.py cv|export [EPOCHS=60] [LAMBDA=0.5]
+Usage: [SEED=0] [N_SEEDS=1] [H1_LABEL=1] [WIDTH=64 LAYERS=2 K_BASIS=64 GATE=0.5 TAG=_name] VCC_PANEL=test python scripts/attn_model.py cv|export [EPOCHS=60] [LAMBDA=0.5]
 """
 import os
 import sys
@@ -44,17 +44,25 @@ from map_model import DATA, EXPR, LABEL_LINES, final_targets, genes, load
 MODE = sys.argv[1]
 EPOCHS = int(sys.argv[2]) if len(sys.argv) > 2 else 60
 LAMBDA = float(sys.argv[3]) if len(sys.argv) > 3 else 0.5
-D, D_GENE, K_BASIS, TAU, BATCH = 64, 16, 64, 0.1, 64
+D_GENE, TAU, BATCH = 16, 0.1, 64
+D = int(os.environ.get("WIDTH", 64))                                   # size variants, named by TAG in the output
+LAYERS = int(os.environ.get("LAYERS", 2))
+K_BASIS = int(os.environ.get("K_BASIS", 64))
+GATE = float(os.environ.get("GATE", 0.5))                              # gates move within 1 +- GATE
+TAG = os.environ.get("TAG", "")
 SEED = int(os.environ.get("SEED", 0))
 N_SEEDS = int(os.environ.get("N_SEEDS", 1))                             # export: average this many models
 DEV = "cuda" if torch.cuda.is_available() else "cpu"
 torch.manual_seed(SEED); rng = np.random.default_rng(SEED)
 
 LAB = {k: v[0] for k, v in DATA.items()}
-h1 = [load(f)[0] for f in ["h1_train_delta.npz", "h1_val_delta.npz", "h1_test_delta.npz"]]
-LAB["h1"] = h1[0].combine_first(h1[1]).combine_first(h1[2])
+h1 = [load(f) for f in ["h1_train_delta.npz", "h1_val_delta.npz", "h1_test_delta.npz"]]
+LAB["h1"] = h1[0][0].combine_first(h1[1][0]).combine_first(h1[2][0])
 SOURCES = list(LAB)                                                     # k562, hct116, hek293t, cd4, h1
 G = np.flatnonzero(np.any([np.nan_to_num(e) >= 0.05 for e in EXPR.values()], 0))   # expressed in some label line
+if os.environ.get("H1_LABEL") == "1":           # H1 (10x Flex like D/E/F) also as a training line, not only a source
+    EXPR = {**EXPR, "h1": np.nanmean([h[1].to_numpy() for h in h1], 0)}
+    LABEL_LINES = LABEL_LINES + ["h1"]
 own_col = {g: i for i, g in enumerate(genes.to_numpy()[G])}
 tcols = np.array([own_col[t] for t in final_targets if t in own_col])
 print(f"genes {len(G)}, sources {SOURCES}, device {DEV}", flush=True)
@@ -91,7 +99,7 @@ class Model(nn.Module):
         self.src_emb = nn.Embedding(n_src, D)
         self.ctx = nn.Linear(K, D)                                      # target control expression -> token
         layer = nn.TransformerEncoderLayer(D, 4, 2 * D, dropout=0.2, batch_first=True)
-        self.enc = nn.TransformerEncoder(layer, 2)
+        self.enc = nn.TransformerEncoder(layer, LAYERS)
         self.gene = nn.Parameter(0.02 * torch.randn(basis.shape[0], D_GENE))   # learned gene embedding
         self.U = nn.Linear(D, D_GENE)
         nn.init.zeros_(self.U.weight); nn.init.zeros_(self.U.bias)      # gates start at exactly 1
@@ -103,7 +111,7 @@ class Model(nn.Module):
         ctx = self.ctx((te - te.mean(1, keepdim=True)) @ self.P)[:, None]
         h = self.enc(torch.cat([ctx, tok], 1), src_key_padding_mask=torch.cat(
             [torch.zeros(n, 1, dtype=torch.bool, device=X.device), ~M], 1))
-        gate = 1 + 0.5 * torch.tanh(self.U(h[:, 1:]) @ self.gene.T + self.expr_w * te[:, None])
+        gate = 1 + GATE * torch.tanh(self.U(h[:, 1:]) @ self.gene.T + self.expr_w * te[:, None])
         gate = gate * M[..., None]
         return (gate * X).sum(1) / M.sum(1, keepdim=True).clamp(min=1)    # gate 1 everywhere = source mean
 
@@ -234,6 +242,6 @@ if MODE == "export":
         out.append(full)
         print(f"context {ctx}: rescaled to the ridge's size; {int((~M.any(1)).sum())} knockdowns without a source",
               flush=True)
-    path = PROCESSED / f"effects_attn{f'_ens{N_SEEDS}' if N_SEEDS > 1 else ''}{SUFFIX}.npz"
+    path = PROCESSED / f"effects_attn{TAG}{f'_ens{N_SEEDS}' if N_SEEDS > 1 else ''}{SUFFIX}.npz"
     np.savez_compressed(path, perts=perts, genes=genes.to_numpy(str), lfc=np.stack(out), contexts=np.array(CONTEXTS))
     print("wrote", path, flush=True)
