@@ -24,7 +24,7 @@ Modes
           gene is copied from it; genes outside the model's gene set stay 0. N_SEEDS > 1 averages that many
           models (seeds SEED, SEED+1, ...) -> effects_attn_ens{N}{SUFFIX}.npz.
 
-Usage: [SEED=0] [N_SEEDS=1] [H1_LABEL=1] [WIDTH=64 LAYERS=2 K_BASIS=64 GATE=0.5 TAG=_name] VCC_PANEL=test python scripts/attn_model.py cv|export [EPOCHS=60] [LAMBDA=0.5]
+Usage: [SEED=0] [N_SEEDS=1] [H1_LABEL=1 [H1_REPEAT=4]] [RESID=1] [WIDTH=64 LAYERS=2 K_BASIS=64 GATE=0.5 TAG=_name] VCC_PANEL=test python scripts/attn_model.py cv|export [EPOCHS=60] [LAMBDA=0.5]
 """
 import os
 import sys
@@ -50,6 +50,8 @@ LAYERS = int(os.environ.get("LAYERS", 2))
 K_BASIS = int(os.environ.get("K_BASIS", 64))
 GATE = float(os.environ.get("GATE", 0.5))                              # gates move within 1 +- GATE
 TAG = os.environ.get("TAG", "")
+RESID = os.environ.get("RESID") == "1"                                # learned correction on top of the gated mean
+H1_REPEAT = int(os.environ.get("H1_REPEAT", 1))                       # train on the H1 line this many times per epoch
 SEED = int(os.environ.get("SEED", 0))
 N_SEEDS = int(os.environ.get("N_SEEDS", 1))                             # export: average this many models
 DEV = "cuda" if torch.cuda.is_available() else "cpu"
@@ -104,6 +106,9 @@ class Model(nn.Module):
         self.U = nn.Linear(D, D_GENE)
         nn.init.zeros_(self.U.weight); nn.init.zeros_(self.U.bias)      # gates start at exactly 1
         self.expr_w = nn.Parameter(torch.zeros(1))
+        if RESID:                                                       # context token -> K pattern weights, starts at 0
+            self.res = nn.Linear(D, K)
+            nn.init.zeros_(self.res.weight); nn.init.zeros_(self.res.bias)
 
     def forward(self, X, M, te, w):
         n, S, _ = X.shape
@@ -113,7 +118,10 @@ class Model(nn.Module):
             [torch.zeros(n, 1, dtype=torch.bool, device=X.device), ~M], 1))
         gate = 1 + GATE * torch.tanh(self.U(h[:, 1:]) @ self.gene.T + self.expr_w * te[:, None])
         gate = gate * M[..., None]
-        return (gate * X).sum(1) / M.sum(1, keepdim=True).clamp(min=1)    # gate 1 everywhere = source mean
+        out = (gate * X).sum(1) / M.sum(1, keepdim=True).clamp(min=1)     # gate 1 everywhere = source mean
+        if RESID:                                                       # a change no source shows, in the main patterns
+            out = out + self.res(h[:, 0]) @ self.P.T
+        return out
 
 
 def losses(pred, Y, w, own):
@@ -141,7 +149,7 @@ def fold_data(H_label, exclude):
     perts = np.array(sorted(set(LAB[H_label].index) & have - set(final_targets)))
     X, M, Y = batch_arrays(perts, srcs, H_label)
     te = np.log1p(np.nan_to_num(EXPR[H_label][G])).astype(np.float32)
-    return dict(X=X, M=M, Y=Y, own=own_mask(perts), w=weight(EXPR[H_label]), te=te, n=len(perts))
+    return dict(X=X, M=M, Y=Y, own=own_mask(perts), w=weight(EXPR[H_label]), te=te, n=len(perts), name=H_label)
 
 
 def train(folds):
@@ -150,9 +158,10 @@ def train(folds):
     model = Model(torch.tensor(basis), len(SOURCES)).to(DEV)
     opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2)
     T = {k: [torch.tensor(f[k], device=DEV) for f in folds] for k in ["X", "M", "Y", "own", "w", "te"]}
+    visits = [fi for fi, f in enumerate(folds) for _ in range(H1_REPEAT if f["name"] == "h1" else 1)]
     for ep in range(EPOCHS):
         model.train(); tot = np.zeros(2); nb = 0
-        for fi in rng.permutation(len(folds)):
+        for fi in rng.permutation(visits):
             order = torch.randperm(folds[fi]["n"], device=DEV)
             for b in range(0, len(order), BATCH):
                 i = order[b:b + BATCH]
